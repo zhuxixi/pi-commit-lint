@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `merge` accepted as a commit type for hand-written merge commits
+  (`merge: integrate main into feature branch`) — closes #1.
+
 ## [0.1.0] - 2026-08-26
 
 First public release — split out of `pi-personal-extensions` (was

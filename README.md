@@ -14,7 +14,7 @@ tool and returns a corrective hint to the model. A port of the Claude Code
 
 当前 subject: "update stuff"
 要求格式: type(scope)?: 描述
-合法 type: feat / fix / docs / style / refactor / perf / test / build / ci / chore / revert
+合法 type: feat / fix / docs / style / refactor / perf / test / build / ci / chore / revert / merge
 
 示例:
   feat(scan): 新增整页 OCR
@@ -92,7 +92,7 @@ git clone https://github.com/zhuxixi/pi-commit-lint.git ~/.pi/agent/extensions/p
 3. The first `-m`/`-am`/`--message` value is extracted as the subject
    (double/single quotes or a bare word; multiple `-m` keep the first).
 4. The subject is checked against `^(TYPES)(\([\w./-]+\))?!?: .+` with
-   `TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"`.
+   `TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|merge"`.
 5. Non-conforming subjects are blocked with `{ block: true, reason }`,
    where `reason` is a Chinese corrective hint.
 
