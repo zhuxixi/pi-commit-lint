@@ -4,7 +4,7 @@
  * The extension entry (index.ts) only wires this into pi's event loop.
  */
 
-const TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert";
+const TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|merge";
 const SUBJECT_RE = new RegExp(`^(${TYPES})(\\([\\w./-]+\\))?!?: .+`);
 // -m "..." / -am "..." / --message="..." / --message "..." / -m '...' / bare -m word
 // (first match = subject; multiple -m keep the first)

@@ -17,6 +17,9 @@ const cases: Array<{ cmd: string; expect: "pass" | "block"; note?: string }> = [
 	{ cmd: 'git commit -m "feat(scan)!: breaking change"', expect: "pass", note: "breaking !" },
 	{ cmd: 'git commit -m "chore(deps/dev): bump esbuild"', expect: "pass", note: "scope with /" },
 	{ cmd: 'git commit -m "docs: 更新设计文档 (#5)"', expect: "pass", note: "issue ref" },
+	{ cmd: 'git commit -m "merge: integrate main into feature branch"', expect: "pass", note: "merge type (issue #1)" },
+	{ cmd: 'git commit -m "merge(deps): merge main into scan"', expect: "pass", note: "merge with scope" },
+	{ cmd: 'git commit -m "Merge branch \'main\' into feature"', expect: "block", note: "git default merge subject stays blocked (pinned non-goal)" },
 	{ cmd: "git commit -m 'refactor(core): split parser'", expect: "pass", note: "single quotes" },
 	{ cmd: "git commit -m bareword: ok", expect: "block", note: "bare -m word, bad type" },
 	{ cmd: "git commit -m test: bare", expect: "block", note: "bare -m captures only first word 'test:' -> no description" },
@@ -79,6 +82,14 @@ check(
 	hint === null ? "passed through" : undefined,
 );
 
+// blocked hint must list merge in the legal types (derived from TYPES)
+const mergeHint = lintCommitCommand('git commit -m "Merge branch \'main\' into x"');
+check(
+	"hint lists merge as legal type",
+	mergeHint !== null && mergeHint.includes("revert / merge"),
+	mergeHint === null ? "passed through" : "legal-type list missing merge",
+);
+
 // multiple -m: first one wins (documented MSG_RE behavior)
 check(
 	"multiple -m keeps first",
@@ -89,4 +100,4 @@ if (failed) {
 	console.error(`\n${failed} checks FAILED`);
 	process.exit(1);
 }
-console.log(`\nall ${cases.length + 2} checks passed`);
+console.log(`\nall ${cases.length + 3} checks passed`);
