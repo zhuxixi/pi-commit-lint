@@ -1,6 +1,6 @@
 {
   "name": "@zhuxixi/pi-commit-lint",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Conventional Commits lint for pi: blocks non-conforming `git commit -m` commands in the bash tool and returns a corrective hint to the model",
   "keywords": [
     "pi",

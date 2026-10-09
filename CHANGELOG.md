@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Added
 
 - `merge` accepted as a commit type for hand-written merge commits
