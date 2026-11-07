@@ -51,6 +51,9 @@ export function lintCommitCommand(command: string): string | null {
 
 		const message = extractCommitMessage(segment);
 		if (message === null) continue; // -F / editor commit: nothing to judge
+		// A message built by command substitution or a variable cannot be judged
+		// statically; blocking it would be a false block (issue #2 follow-up).
+		if (/`|\$[({A-Za-z0-9_]/.test(message)) continue;
 
 		const subject = message.trim().split("\n", 1)[0].trim();
 		if (SUBJECT_RE.test(subject)) continue;
@@ -67,8 +70,8 @@ export function lintCommitCommand(command: string): string | null {
  * Length-preserving, so callers can still report original positions.
  *
  * Fail-open: an unterminated heredoc swallows the rest of the string, and an
- * unclosed quote leaves the remainder untouched — both end up as "not a
- * commit", never as a false block.
+ * unclosed quote leaves the remainder untouched. Neither throws, and neither
+ * invents an executable commit command.
  */
 export function maskHeredocBodies(command: string): string {
 	const out = command.split("");
@@ -240,8 +243,15 @@ export function splitCommandSegments(masked: string): string[] {
 		}
 
 		if (c === "&" || c === "|") {
+			// Redirections are not separators: `2>&1`, `>&2`, `&>file`.
+			const previous = i > 0 ? masked[i - 1] : "";
+			const nextChar = masked[i + 1] ?? "";
+			if (previous === ">" || previous === "<" || (c === "&" && nextChar === ">")) {
+				i++;
+				continue;
+			}
 			push(i);
-			i += masked[i + 1] === c ? 2 : 1;
+			i += nextChar === c ? 2 : 1;
 			start = i;
 			continue;
 		}
@@ -321,23 +331,44 @@ function tokenizeSegment(segment: string): ShellToken[] {
  * First `-m`/`-am`/`-qm`/`--message`/`--message=`/`-mfoo` value in a segment.
  * Returns null when the segment carries no message option (`-F`, `--file`,
  * `--amend`, bare `git commit`) — the caller must then pass through.
+ *
+ * An empty `-m ""` is a paragraph separator in git's multi-`-m` model, so it
+ * yields to a later non-empty `-m`; when every value is empty the first one is
+ * returned and the caller blocks on the empty subject, as before.
  */
 export function extractCommitMessage(segment: string): string | null {
 	const tokens = tokenizeSegment(segment);
+	let emptyValue: string | null = null;
 
 	for (let i = 0; i < tokens.length; i++) {
 		const value = tokens[i].value;
-		const next = () => (i + 1 < tokens.length ? tokens[i + 1].value : null);
+		let candidate: string | null;
 
-		if (value === "-m" || value === "--message") return next();
-		if (value.startsWith("--message=")) return value.slice("--message=".length);
-		// Attached form must win over the cluster form: `-mfrom` is message
-		// "from", not a flag cluster that happens to end in "m".
-		if (value.startsWith("-m") && value.length > 2) return value.slice(2);
-		// Only value-less short flags may precede the trailing `m`; flags that
-		// take a value (`-F`, `-C`, `-c`, `-S`, `-t`) must not match here.
-		if (/^-[aeinopqsuvN]+m$/.test(value)) return next();
+		if (value === "-m" || value === "--message") {
+			candidate = i + 1 < tokens.length ? tokens[i + 1].value : null;
+			i++;
+		} else if (value.startsWith("--message=")) {
+			candidate = value.slice("--message=".length);
+		} else if (value.startsWith("-m") && value.length > 2) {
+			// Attached form must win over the cluster form: `-mfrom` is message
+			// "from", not a flag cluster that happens to end in "m".
+			candidate = value.slice(2);
+		} else if (/^-[aeinopqsuv]+m$/.test(value)) {
+			// Only value-less short flags may precede the trailing `m`; flags that
+			// take a value (`-F`, `-C`, `-c`, `-S`, `-t`) must not match here.
+			candidate = i + 1 < tokens.length ? tokens[i + 1].value : null;
+			i++;
+		} else {
+			continue;
+		}
+
+		if (candidate === null) continue;
+		if (candidate.trim() === "") {
+			if (emptyValue === null) emptyValue = candidate;
+			continue;
+		}
+		return candidate;
 	}
 
-	return null;
+	return emptyValue;
 }

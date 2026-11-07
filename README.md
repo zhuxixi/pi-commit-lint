@@ -141,6 +141,11 @@ After editing, run `/reload` inside pi to hot-reload the extension.
 - This is a minimal shell scanner, not a shell parser: command substitution
   (`$(…)`, backticks) and process substitution are treated as opaque text.
   Anything the scanner cannot classify fails open (the command is allowed).
+- A subject built at runtime — `-m "$(cat msg.txt)"`, `` -m `cat msg.txt` ``,
+  `-m "$MSG"` — is not judged; the commit passes through, since the real
+  text is unknowable when the command is intercepted.
+- Redirections (`2>&1`, `&>file`) do not split a command segment, so
+  `git commit 2>&1 -m "…"` is judged as one commit.
 - The check runs on the `tool_call` event, before the command executes; it is
   not a git hook. A blocked command never runs, so side effects earlier in
   the same chain do not happen either.

@@ -61,6 +61,12 @@ const cases: Array<{ cmd: string; expect: "pass" | "block"; note?: string }> = [
 	{ cmd: 'git add -A\ngit commit -m "update"', expect: "block", note: "newline is a separator (was a false negative)" },
 	{ cmd: 'ls -la # see && git commit -m "update"', expect: "pass", note: "issue #2 H: # comment is not executed" },
 	{ cmd: 'git commit -m "feat: ok" && git commit -m "bad"', expect: "block", note: "second commit segment decides when the first conforms" },
+	// --- issue #2 follow-up: review findings 1-3 ---
+	{ cmd: 'git commit -m "" -m "feat: x"', expect: "pass", note: "empty -m is a paragraph separator, later -m is the subject" },
+	{ cmd: 'git commit -m "$(cat /tmp/msg.txt)"', expect: "pass", note: "command substitution cannot be judged statically" },
+	{ cmd: "git commit -m `cat /tmp/msg.txt`", expect: "pass", note: "backtick substitution fails open" },
+	{ cmd: 'git commit 2>&1 -m "update"', expect: "block", note: "redirection before the message still blocks" },
+	{ cmd: 'git commit -m "update" 2>&1', expect: "block", note: "trailing redirection still blocks" },
 ];
 
 let failed = 0;
@@ -141,8 +147,16 @@ check(
 	longHint === null ? "passed through" : "truncation marker missing",
 );
 
+// redirection must not inflate the segment count the hint reports
+const redirectHint = lintCommitCommand('git commit -m "update" 2>&1');
+check(
+	"redirection does not add a phantom segment",
+	redirectHint !== null && redirectHint.includes("(1/1)"),
+	redirectHint === null ? "passed through" : "position wrong",
+);
+
 if (failed) {
 	console.error(`\n${failed} checks FAILED`);
 	process.exit(1);
 }
-console.log(`\nall ${cases.length + 7} checks passed`);
+console.log(`\nall ${cases.length + 8} checks passed`);

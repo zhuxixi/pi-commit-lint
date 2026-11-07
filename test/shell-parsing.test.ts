@@ -83,7 +83,11 @@ check("empty input yields no segments", segs("").length === 0);
 
 {
 	const parts = splitCommandSegments('git commit -m "update" 2>&1').map((s) => s.trim());
-	check("2>&1 is cut at & (harmless)", parts.length === 2 && parts[0].includes('"update"'), parts.join("|"));
+	check("2>&1 is a redirection, not a separator", parts.length === 1 && parts[0].includes('"update"'), parts.join("|"));
+	const lead = splitCommandSegments('git commit 2>&1 -m "update"').map((s) => s.trim());
+	check("leading 2>&1 keeps the message in the segment", lead.length === 1 && lead[0].includes('-m "update"'), lead.join("|"));
+	const stderrRedirect = splitCommandSegments("git commit -m x &>/dev/null").map((s) => s.trim());
+	check("&> is a redirection, not a separator", stderrRedirect.length === 1, stderrRedirect.join("|"));
 }
 
 // --- extractCommitMessage: quote-aware, segment-local, first match wins ---
@@ -107,6 +111,8 @@ check("--amend alone yields null", extractCommitMessage("git commit --amend") ==
 check("bare commit yields null", extractCommitMessage("git commit") === null);
 check("-m without a value yields null", extractCommitMessage("git commit -m") === null);
 check("empty -m keeps empty string", extractCommitMessage('git commit -m ""') === "");
+check("empty -m yields to a later paragraph", extractCommitMessage('git commit -m "" -m "feat: x"') === "feat: x");
+check("-Nm is not a cluster", extractCommitMessage("git commit -Nm -q") === null);
 
 if (failed) {
 	console.error(`\n${failed} checks FAILED`);
