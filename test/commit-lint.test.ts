@@ -1,7 +1,8 @@
 /**
  * Positive/negative cases for lintCommitCommand() — issue #6.
  * Covers Conventional Commits conformance (SUBJECT_RE), -m extraction
- * (MSG_RE), and git-commit detection without false positives (COMMIT_RE).
+ * (extractCommitMessage), and segment-scoped git-commit detection
+ * (splitCommandSegments + COMMIT_SEGMENT_RE, issue #2).
  *
  * Run with (no test framework — zero-dep, bundled by esbuild):
  *   npx esbuild test/commit-lint.test.ts --bundle --format=esm \
@@ -48,6 +49,18 @@ const cases: Array<{ cmd: string; expect: "pass" | "block"; note?: string }> = [
 	{ cmd: "git status", expect: "pass", note: "not a commit" },
 	{ cmd: 'echo "git commit -m \\"update\\""', expect: "pass", note: "quoted mention, no false positive" },
 	{ cmd: 'git log --grep="git commit -m"', expect: "pass", note: "grep pattern mention" },
+
+	// --- issue #2: the message must come from the commit segment ---
+	{ cmd: 'python3 -m unittest test_x -v && git commit -m "fix: real subject"', expect: "pass", note: "issue #2 A: earlier -m is not the commit message" },
+	{ cmd: `cat > /tmp/x.md <<'EOF'\npython3 -m unittest test_x -v && git commit -m "docs: 示例"\nEOF`, expect: "pass", note: "issue #2 B: heredoc body is not executed" },
+	{ cmd: "git add a.py && git commit -q -F /tmp/msg.txt && git log --oneline -1 && python3 -m unittest test_x", expect: "pass", note: "issue #2 C1: -F message, no -m in the segment" },
+	{ cmd: 'python3 -m unittest test_a test_b 2>&1 | tail -2 && git add -A && git commit -q -m "fix(cr): round 1"', expect: "pass", note: "issue #2 C2: unittest before commit" },
+	{ cmd: 'git stash push a.yml b.yml -m "暂存两份改动" && git add -A && git commit -F /tmp/commitmsg.txt', expect: "pass", note: "issue #2 D: stash -m is not the commit message" },
+	{ cmd: 'git stash push a.yml -m "stash msg" && git commit -m "fix(deploy): 修复超时"', expect: "pass", note: "issue #2 D2: conforming commit after stash -m" },
+	{ cmd: 'git commit -F /tmp/msg.txt && git stash push -m "wip"', expect: "pass", note: "issue #2 E: -m after the commit belongs to stash" },
+	{ cmd: 'git add -A\ngit commit -m "update"', expect: "block", note: "newline is a separator (was a false negative)" },
+	{ cmd: 'ls -la # see && git commit -m "update"', expect: "pass", note: "issue #2 H: # comment is not executed" },
+	{ cmd: 'git commit -m "feat: ok" && git commit -m "bad"', expect: "block", note: "second commit segment decides when the first conforms" },
 ];
 
 let failed = 0;
@@ -90,14 +103,46 @@ check(
 	mergeHint === null ? "passed through" : "legal-type list missing merge",
 );
 
-// multiple -m: first one wins (documented MSG_RE behavior)
+// multiple -m: first one wins (documented extractCommitMessage behavior)
 check(
 	"multiple -m keeps first",
 	lintCommitCommand('git commit -m "bad" -m "feat: good"') !== null,
+);
+
+// blocked hint must name the blocking source (issue #2: downstream users
+// burned hours hunting for a repo git hook that never existed)
+const sourceHint = lintCommitCommand('git commit -m "update"');
+check(
+	"hint names the extension as the source",
+	sourceHint !== null && sourceHint.includes("pi 扩展") && sourceHint.includes("@zhuxixi/pi-commit-lint"),
+	sourceHint === null ? "passed through" : "source line missing",
+);
+
+// ... and echo the detected fragment with its position among the segments
+check(
+	"hint echoes fragment and position",
+	sourceHint !== null && sourceHint.includes("检测到的命令片段 (1/1)") && sourceHint.includes('git commit -m "update"'),
+	sourceHint === null ? "passed through" : "fragment line missing",
+);
+
+// multi-segment command: the offending segment is reported as 2/2
+const multiHint = lintCommitCommand('git commit -m "feat: ok" && git commit -m "bad"');
+check(
+	"multi-segment position",
+	multiHint !== null && multiHint.includes("(2/2)"),
+	multiHint === null ? "passed through" : "position missing",
+);
+
+// long fragments are truncated so the hint stays readable
+const longHint = lintCommitCommand(`git commit -m "update ${"x".repeat(200)}"`);
+check(
+	"long fragment truncated",
+	longHint !== null && longHint.includes("已截断"),
+	longHint === null ? "passed through" : "truncation marker missing",
 );
 
 if (failed) {
 	console.error(`\n${failed} checks FAILED`);
 	process.exit(1);
 }
-console.log(`\nall ${cases.length + 3} checks passed`);
+console.log(`\nall ${cases.length + 7} checks passed`);

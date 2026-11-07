@@ -6,18 +6,19 @@
 
 const TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|merge";
 const SUBJECT_RE = new RegExp(`^(${TYPES})(\\([\\w./-]+\\))?!?: .+`);
-// -m "..." / -am "..." / --message="..." / --message "..." / -m '...' / bare -m word
-// (first match = subject; multiple -m keep the first)
-const MSG_RE = /(?:\s-m\b|\s-am\b|--message[=\s])\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))/;
-// git commit must start the command or follow a command separator (&& || ; & |),
-// so quoted text / heredoc bodies / grep patterns mentioning "git commit" don't
-// false-positive (CC original matched anywhere — hit twice in one session).
-const COMMIT_RE = /(?:^|&&|\|\||[;&|])\s*git\s+commit\b/;
+// A commit invocation must be the whole segment, not a quoted mention.
+const COMMIT_SEGMENT_RE = /^\s*git\s+commit\b/;
+const FRAGMENT_LIMIT = 160;
 
-function buildHint(subject: string): string {
+function buildHint(subject: string, fragment: string, position: number, total: number): string {
+	const flat = fragment.replace(/\s+/g, " ").trim();
+	const shown = flat.length > FRAGMENT_LIMIT ? `${flat.slice(0, FRAGMENT_LIMIT)}…（已截断）` : flat;
+
 	return [
 		"🚫 commit message 不符合 Conventional Commits，已阻止提交。",
 		"",
+		"来源: pi 扩展 @zhuxixi/pi-commit-lint（不是仓库的 git hook，也不在 core.hooksPath 里）",
+		`检测到的命令片段 (${position}/${total}): ${shown}`,
 		`当前 subject: ${JSON.stringify(subject)}`,
 		"要求格式: type(scope)?: 描述",
 		`合法 type: ${TYPES.split("|").join(" / ")}`,
@@ -27,21 +28,37 @@ function buildHint(subject: string): string {
 		"  fix(qa): 修复离散采样越界",
 		"  docs: 更新设计文档 (#5)",
 		"",
+		"提示: 消息来自 -F/--file 文件或编辑器时本扩展不拦截；把提交拆成单独一次 bash 调用可避免片段混淆。",
+		"",
 		"请改成规范格式后重新提交。",
 	].join("\n");
 }
 
 /**
- * Returns a block reason if `command` is a non-conforming `git commit -m`,
- * else null (pass through). Pure function — exported for unit testing.
+ * Returns a block reason if `command` contains a non-conforming
+ * `git commit -m` segment, else null (pass through). Pure function.
+ *
+ * The message is read from the segment that owns the `git commit`, never
+ * from the whole string: a `-m` in `python3 -m unittest` or in a
+ * `git stash push -m` is not a commit message (issue #2).
  */
 export function lintCommitCommand(command: string): string | null {
-	if (!COMMIT_RE.test(command)) return null;
-	const m = MSG_RE.exec(command);
-	if (!m) return null; // no -m (editor/heredoc commit), can't intercept — pass
-	const subject = (m[1] ?? m[2] ?? m[3] ?? "").trim().split("\n", 1)[0].trim();
-	if (SUBJECT_RE.test(subject)) return null;
-	return buildHint(subject);
+	const segments = splitCommandSegments(maskHeredocBodies(command));
+
+	for (let i = 0; i < segments.length; i++) {
+		const segment = segments[i];
+		if (!COMMIT_SEGMENT_RE.test(segment)) continue;
+
+		const message = extractCommitMessage(segment);
+		if (message === null) continue; // -F / editor commit: nothing to judge
+
+		const subject = message.trim().split("\n", 1)[0].trim();
+		if (SUBJECT_RE.test(subject)) continue;
+
+		return buildHint(subject, segment.trim(), i + 1, segments.length);
+	}
+
+	return null;
 }
 
 /**
