@@ -313,9 +313,13 @@ export function extractCommitMessage(segment: string): string | null {
 		const next = () => (i + 1 < tokens.length ? tokens[i + 1].value : null);
 
 		if (value === "-m" || value === "--message") return next();
-		if (/^-[A-Za-z]+m$/.test(value)) return next();
 		if (value.startsWith("--message=")) return value.slice("--message=".length);
+		// Attached form must win over the cluster form: `-mfrom` is message
+		// "from", not a flag cluster that happens to end in "m".
 		if (value.startsWith("-m") && value.length > 2) return value.slice(2);
+		// Only value-less short flags may precede the trailing `m`; flags that
+		// take a value (`-F`, `-C`, `-c`, `-S`, `-t`) must not match here.
+		if (/^-[aeinopqsuvN]+m$/.test(value)) return next();
 	}
 
 	return null;
