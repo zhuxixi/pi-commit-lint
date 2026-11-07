@@ -241,3 +241,82 @@ export function splitCommandSegments(masked: string): string[] {
 	push(masked.length);
 	return segments;
 }
+
+interface ShellToken {
+	/** Value with quotes removed and escapes resolved. */
+	value: string;
+}
+
+/** Minimal shell word splitter: whitespace-separated, quote-aware. */
+function tokenizeSegment(segment: string): ShellToken[] {
+	const tokens: ShellToken[] = [];
+	let i = 0;
+
+	while (i < segment.length) {
+		while (i < segment.length && /\s/.test(segment[i])) i++;
+		if (i >= segment.length) break;
+		let value = "";
+
+		while (i < segment.length && !/\s/.test(segment[i])) {
+			const c = segment[i];
+			if (c === "'") {
+				i++;
+				while (i < segment.length && segment[i] !== "'") {
+					value += segment[i];
+					i++;
+				}
+				i++;
+				continue;
+			}
+			if (c === '"') {
+				i++;
+				while (i < segment.length && segment[i] !== '"') {
+					if (segment[i] === "\\" && i + 1 < segment.length) {
+						const next = segment[i + 1];
+						if (next === '"' || next === "\\" || next === "$" || next === "`") {
+							value += next;
+							i += 2;
+							continue;
+						}
+					}
+					value += segment[i];
+					i++;
+				}
+				i++;
+				continue;
+			}
+			if (c === "\\" && i + 1 < segment.length) {
+				value += segment[i + 1];
+				i += 2;
+				continue;
+			}
+			value += c;
+			i++;
+		}
+
+		tokens.push({ value });
+	}
+
+	return tokens;
+}
+
+/**
+ * First `-m`/`-am`/`-qm`/`--message`/`--message=`/`-mfoo` value in a segment.
+ * Returns null when the segment carries no message option (`-F`, `--file`,
+ * `--amend`, bare `git commit`) — the caller must then pass through.
+ */
+export function extractCommitMessage(segment: string): string | null {
+	const tokens = tokenizeSegment(segment);
+
+	for (let i = 0; i < tokens.length; i++) {
+		const value = tokens[i].value;
+		const next = () => (i + 1 < tokens.length ? tokens[i + 1].value : null);
+
+		if (value === "-m" || value === "--message") return next();
+		if (/^-[A-Za-z]+m$/.test(value)) return next();
+		if (value.startsWith("--message=")) return value.slice("--message=".length);
+		if (value.startsWith("-m") && value.length > 2) return value.slice(2);
+	}
+
+	return null;
+}

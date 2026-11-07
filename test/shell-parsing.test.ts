@@ -6,7 +6,7 @@
  *   npx esbuild test/shell-parsing.test.ts --bundle --format=esm \
  *     --platform=node --outfile=/tmp/shell-parsing-test.mjs && node /tmp/shell-parsing-test.mjs
  */
-import { maskHeredocBodies, splitCommandSegments } from "../lib/commit-lint";
+import { extractCommitMessage, maskHeredocBodies, splitCommandSegments } from "../lib/commit-lint";
 
 let failed = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -85,6 +85,23 @@ check("empty input yields no segments", segs("").length === 0);
 	const parts = splitCommandSegments('git commit -m "update" 2>&1').map((s) => s.trim());
 	check("2>&1 is cut at & (harmless)", parts.length === 2 && parts[0].includes('"update"'), parts.join("|"));
 }
+
+// --- extractCommitMessage: quote-aware, segment-local, first match wins ---
+
+check("-m quoted", extractCommitMessage('git commit -m "x"') === "x");
+check("-am cluster", extractCommitMessage('git commit -am "x"') === "x");
+check("-qm cluster", extractCommitMessage('git commit -qm "x"') === "x");
+check("--message space form", extractCommitMessage('git commit --message "x"') === "x");
+check("--message= form", extractCommitMessage('git commit --message="x"') === "x");
+check("-mfoo attached", extractCommitMessage("git commit -mfoo") === "foo");
+check("escaped quotes unescape", extractCommitMessage('git commit -m "a \\"b\\" c"') === 'a "b" c');
+check("multiple -m keep the first", extractCommitMessage('git commit -m "first" -m "second"') === "first");
+check("-F only yields null", extractCommitMessage("git commit -F /tmp/msg.txt") === null);
+check("-Fmsg is not -m", extractCommitMessage("git commit -Fmsg") === null);
+check("--amend alone yields null", extractCommitMessage("git commit --amend") === null);
+check("bare commit yields null", extractCommitMessage("git commit") === null);
+check("-m without a value yields null", extractCommitMessage("git commit -m") === null);
+check("empty -m keeps empty string", extractCommitMessage('git commit -m ""') === "");
 
 if (failed) {
 	console.error(`\n${failed} checks FAILED`);
