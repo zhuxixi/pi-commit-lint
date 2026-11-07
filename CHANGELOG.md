@@ -6,6 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Commit messages are now read from the `git commit` command segment, not
+  from the first `-m` anywhere in the command string. Fixes false blocks on
+  chained commands, heredoc bodies, `#` comments and `-F`/stash messages,
+  and catches newline-separated commits that used to slip through (#2).
+- Block hints now name the blocking extension and echo the detected command
+  fragment with its segment position (#2).
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
