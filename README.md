@@ -91,8 +91,8 @@ git clone https://github.com/zhuxixi/pi-commit-lint.git ~/.pi/agent/extensions/p
 
 1. On the `tool_call` event, non-`bash` calls are ignored.
 2. Text a shell never executes is blanked first: heredoc bodies
-   (`<<EOF`, `<<-EOF`, quoted delimiters) and `#` comments. Blanking is
-   length-preserving, so reported positions stay accurate.
+   (`<<EOF`, `<<-EOF`, quoted delimiters) and `#` comments, so a commit
+   command quoted inside documentation prose is not judged as one.
 3. The remaining string is split into command segments on unquoted
    separators: `&&`, `||`, `;`, `&`, `|`, newline. Quotes protect their
    contents, so `-m "a && b"` stays one segment.
