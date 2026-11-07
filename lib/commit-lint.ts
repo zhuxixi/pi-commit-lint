@@ -43,3 +43,201 @@ export function lintCommitCommand(command: string): string | null {
 	if (SUBJECT_RE.test(subject)) return null;
 	return buildHint(subject);
 }
+
+/**
+ * Blank out the parts of a command string that a shell never executes:
+ * heredoc bodies (including their terminator line) and `#` comments.
+ * Length-preserving, so callers can still report original positions.
+ *
+ * Fail-open: an unterminated heredoc swallows the rest of the string, and an
+ * unclosed quote leaves the remainder untouched — both end up as "not a
+ * commit", never as a false block.
+ */
+export function maskHeredocBodies(command: string): string {
+	const out = command.split("");
+	const pending: Array<{ delim: string; stripTabs: boolean }> = [];
+	let i = 0;
+	let inSingle = false;
+	let inDouble = false;
+
+	while (i < command.length) {
+		const c = command[i];
+
+		if (inSingle) {
+			if (c === "'") inSingle = false;
+			i++;
+			continue;
+		}
+		if (inDouble) {
+			if (c === "\\") {
+				i += 2;
+				continue;
+			}
+			if (c === '"') inDouble = false;
+			i++;
+			continue;
+		}
+		if (c === "\\") {
+			i += 2;
+			continue;
+		}
+		if (c === "'") {
+			inSingle = true;
+			i++;
+			continue;
+		}
+		if (c === '"') {
+			inDouble = true;
+			i++;
+			continue;
+		}
+
+		// `#` starts a comment only at the beginning of a word.
+		if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+			while (i < command.length && command[i] !== "\n") {
+				out[i] = " ";
+				i++;
+			}
+			continue;
+		}
+
+		if (c === "<" && command[i + 1] === "<") {
+			if (command[i + 2] === "<") {
+				i += 3; // herestring: no body follows
+				continue;
+			}
+			let j = i + 2;
+			let stripTabs = false;
+			if (command[j] === "-") {
+				stripTabs = true;
+				j++;
+			}
+			while (j < command.length && (command[j] === " " || command[j] === "\t")) j++;
+			let delim = "";
+			while (j < command.length) {
+				const d = command[j];
+				if (d === "'" || d === '"') {
+					const quote = d;
+					j++;
+					while (j < command.length && command[j] !== quote) {
+						if (quote === '"' && command[j] === "\\") {
+							j++;
+							if (j >= command.length) break;
+						}
+						delim += command[j];
+						j++;
+					}
+					j++; // closing quote
+					continue;
+				}
+				if (d === "\\") {
+					j++;
+					if (j < command.length) {
+						delim += command[j];
+						j++;
+					}
+					continue;
+				}
+				if (/[\s;&|<>()]/.test(d)) break;
+				delim += d;
+				j++;
+			}
+			if (delim) pending.push({ delim, stripTabs });
+			i = j;
+			continue;
+		}
+
+		if (c === "\n") {
+			i++;
+			for (const heredoc of pending) {
+				const bodyStart = i;
+				while (i < command.length) {
+					let lineEnd = command.indexOf("\n", i);
+					if (lineEnd === -1) lineEnd = command.length;
+					let line = command.slice(i, lineEnd);
+					if (heredoc.stripTabs) line = line.replace(/^\t+/, "");
+					i = lineEnd < command.length ? lineEnd + 1 : lineEnd;
+					if (line === heredoc.delim) break;
+				}
+				for (let k = bodyStart; k < i; k++) {
+					if (command[k] !== "\n") out[k] = " ";
+				}
+			}
+			pending.length = 0;
+			continue;
+		}
+
+		i++;
+	}
+
+	return out.join("");
+}
+
+/**
+ * Split a (already masked) command string into command segments on the
+ * separators a shell honours: `&&`, `||`, `;`, `&`, `|` and newline.
+ * Separators inside single/double quotes do not split.
+ */
+export function splitCommandSegments(masked: string): string[] {
+	const segments: string[] = [];
+	let start = 0;
+	let i = 0;
+	let inSingle = false;
+	let inDouble = false;
+
+	const push = (end: number) => {
+		const segment = masked.slice(start, end);
+		if (segment.trim() !== "") segments.push(segment);
+	};
+
+	while (i < masked.length) {
+		const c = masked[i];
+
+		if (inSingle) {
+			if (c === "'") inSingle = false;
+			i++;
+			continue;
+		}
+		if (inDouble) {
+			if (c === "\\") {
+				i += 2;
+				continue;
+			}
+			if (c === '"') inDouble = false;
+			i++;
+			continue;
+		}
+		if (c === "\\") {
+			i += 2;
+			continue;
+		}
+		if (c === "'") {
+			inSingle = true;
+			i++;
+			continue;
+		}
+		if (c === '"') {
+			inDouble = true;
+			i++;
+			continue;
+		}
+
+		if (c === "&" || c === "|") {
+			push(i);
+			i += masked[i + 1] === c ? 2 : 1;
+			start = i;
+			continue;
+		}
+		if (c === ";" || c === "\n") {
+			push(i);
+			i++;
+			start = i;
+			continue;
+		}
+
+		i++;
+	}
+
+	push(masked.length);
+	return segments;
+}
