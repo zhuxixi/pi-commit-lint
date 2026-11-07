@@ -32,6 +32,7 @@ tool and returns a corrective hint to the model. A port of the Claude Code
 - [How It Works](#how-it-works)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
 - [License](#license)
 
 ## Features
@@ -40,11 +41,13 @@ tool and returns a corrective hint to the model. A port of the Claude Code
   does not match Conventional Commits is blocked at the tool call; the
   block reason is the corrective hint, sent back to the model so it can
   retry with a valid message.
-- **No false positives on git detection**: `git commit` must start the
-  command or follow a command separator (`&&` `||` `;` `&` `|`), so
-  quoted text, heredoc bodies and grep patterns mentioning `git commit`
-  never trigger (the CC original matched anywhere and false-positived
-  twice in one session).
+- **Segment-scoped message lookup**: the command is first stripped of text a
+  shell never executes (heredoc bodies, `#` comments), then split into
+  command segments (`&&` `||` `;` `&` `|` newline). Only the `git commit`
+  segment is asked for its message, so `python3 -m unittest … && git commit
+  -m "fix: x"` and `git commit -F msg.txt && git stash push -m "wip"` are
+  judged on the real message. A commit with no message option (`-F`,
+  `--file`, `--amend`) passes through.
 - **Only `-m` commits are intercepted**: editor/heredoc commits
   (no `-m`/`-am`/`--message`) pass through untouched.
 - **Zero dependencies beyond pi**: the validation logic is a pure
@@ -87,13 +90,20 @@ git clone https://github.com/zhuxixi/pi-commit-lint.git ~/.pi/agent/extensions/p
 ## How It Works
 
 1. On the `tool_call` event, non-`bash` calls are ignored.
-2. The command is matched against `COMMIT_RE` — `git commit` at the
-   start of the command or right after a separator.
-3. The first `-m`/`-am`/`--message` value is extracted as the subject
-   (double/single quotes or a bare word; multiple `-m` keep the first).
-4. The subject is checked against `^(TYPES)(\([\w./-]+\))?!?: .+` with
+2. Text a shell never executes is blanked first: heredoc bodies
+   (`<<EOF`, `<<-EOF`, quoted delimiters) and `#` comments, so a commit
+   command quoted inside documentation prose is not judged as one.
+3. The remaining string is split into command segments on unquoted
+   separators: `&&`, `||`, `;`, `&`, `|`, newline. Quotes protect their
+   contents, so `-m "a && b"` stays one segment.
+4. Every segment starting with `git commit` is inspected on its own. The
+   first `-m` / `-am` / `-qm` / `--message` / `--message=` / `-mfoo` value
+   in that segment is the subject (multiple `-m` keep the first). A
+   segment with no message option is skipped — `-F` / `--file` message
+   files are not read.
+5. The subject is checked against `^(TYPES)(\([\w./-]+\))?!?: .+` with
    `TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|merge"`.
-5. Non-conforming subjects are blocked with `{ block: true, reason }`,
+6. Non-conforming subjects are blocked with `{ block: true, reason }`,
    where `reason` is a Chinese corrective hint.
 
 No configuration, no commands, no state files — it just works.
@@ -115,11 +125,30 @@ After editing, run `/reload` inside pi to hot-reload the extension.
 - **Commits aren't blocked**: check that the extension is listed in
   `pi config`; after install you must `/reload` (or restart) pi for the
   extension to load.
-- **A commit was blocked unexpectedly**: the subject must include a
-  valid type prefix and a non-empty description after the colon; check
-  for missing space or wrong separator (a comma between type and scope
-  instead of parentheses).
+- **A commit was blocked unexpectedly**: read the hint's first lines. `来源:`
+  names this extension (it is not a repo git hook), and `检测到的命令片段
+  (n/m)` shows exactly which segment was judged — check that the message in
+  that segment really is the one you meant to commit.
 - **Editor/heredoc commits**: these are intentionally not intercepted.
+
+## Limitations
+
+- `-F` / `--file` message files are **not** read or validated; such commits
+  pass through. The file may not exist yet when the tool call is intercepted.
+- `git -C <dir> commit`, environment-prefixed invocations (`VAR=x git commit`)
+  and subshell forms (`(git commit …)`) are not recognised — they pass
+  through unvalidated.
+- This is a minimal shell scanner, not a shell parser: command substitution
+  (`$(…)`, backticks) and process substitution are treated as opaque text.
+  Anything the scanner cannot classify fails open (the command is allowed).
+- A subject built at runtime — `-m "$(cat msg.txt)"`, `` -m `cat msg.txt` ``,
+  `-m "$MSG"` — is not judged; the commit passes through, since the real
+  text is unknowable when the command is intercepted.
+- Redirections (`2>&1`, `&>file`) do not split a command segment, so
+  `git commit 2>&1 -m "…"` is judged as one commit.
+- The check runs on the `tool_call` event, before the command executes; it is
+  not a git hook. A blocked command never runs, so side effects earlier in
+  the same chain do not happen either.
 
 ## License
 
